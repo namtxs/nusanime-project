@@ -115,6 +115,40 @@ function mapSubtitles(list: any[] | undefined): DashSubtitleTrack[] {
   return out
 }
 
+function looksDubbed(data: any) {
+  const text = [
+    asDisplayText(data?.title),
+    asDisplayText(data?.update_desc),
+    ...(Array.isArray(data?.details?.union_info) ? data.details.union_info : []),
+    ...extractStyles(data),
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase()
+  return /\bdub(\b|bing|\s*indo|\s*id)|\bdubbing|\bdubbed/.test(text)
+}
+
+function subtitlesFromPayload(data: any) {
+  const ep = extractEpisodes(data).find(
+    (e) => String(e.episode_id) === episodeId.value
+  )
+  return mapSubtitles([
+    ...(Array.isArray(data?.subtitles) ? data.subtitles : []),
+    ...(Array.isArray(ep?.subtitles) ? ep.subtitles : []),
+  ])
+}
+
+async function resolveSubtitles(data: any) {
+  const existing = subtitlesFromPayload(data)
+  if (existing.length) return existing
+  if (isDracin.value && looksDubbed(data)) return []
+  try {
+    return mapSubtitles(await contentService.getSubtitles(episodeId.value))
+  } catch {
+    return []
+  }
+}
+
 function episodeLabel(ep: any, index: number) {
   return ep.short_title || ep.episode_number || ep.index || index + 1
 }
@@ -165,15 +199,7 @@ async function load() {
     )
     selectedQuality.value = q
     buildStream(q)
-    subtitles.value = isDracin.value ? [] : mapSubtitles(data.subtitles)
-    if (!subtitles.value.length && !isDracin.value) {
-      try {
-        const fromApi = await contentService.getSubtitles(episodeId.value)
-        subtitles.value = mapSubtitles(fromApi)
-      } catch {
-        // ignore
-      }
-    }
+    subtitles.value = await resolveSubtitles(data)
 
     const related = await relatedService
       .getRelatedAnime(seasonId.value, data, { episodeId: episodeId.value })

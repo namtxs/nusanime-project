@@ -140,10 +140,11 @@ function registerPlayerSettings() {
 }
 
 function applySubtitles() {
+  const sources = buildSubtitleSources()
   const sub = player?.context?.ui?.subtitle
   if (!sub || applyingSubtitles) return
+  if (!sources.length) return
 
-  const sources = buildSubtitleSources()
   applyingSubtitles = true
   try {
     sub.changeSource(sources)
@@ -182,6 +183,23 @@ async function boot() {
   ])
 
   const sources = buildSubtitleSources()
+  const uiOptions: Record<string, unknown> = {
+    theme: {
+      primaryColor: '#9147ff',
+    },
+  }
+  if (sources.length) {
+    uiOptions.subtitle = {
+      source: sources,
+      background: false,
+      fontSize: 28,
+      bottom: '8%',
+      marginBottom: '3.4em',
+      shadow:
+        '-2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 2px 2px 0 #000, -2px 0 0 #000, 2px 0 0 #000, 0 -2px 0 #000, 0 2px 0 #000',
+      onChange: (item: OPlayerSubtitleSource) => loadSubtitleText(item),
+    }
+  }
 
   player = Player.make(hostRef.value, {
     source: {
@@ -192,21 +210,7 @@ async function boot() {
     crossorigin: true,
   })
     .use([
-      ui({
-        theme: {
-          primaryColor: '#9147ff',
-        },
-        subtitle: {
-          source: sources,
-          background: false,
-          fontSize: 28,
-          bottom: '8%',
-          marginBottom: '3.4em',
-          shadow:
-            '-2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 2px 2px 0 #000, -2px 0 0 #000, 2px 0 0 #000, 0 -2px 0 #000, 0 2px 0 #000',
-          onChange: (item: OPlayerSubtitleSource) => loadSubtitleText(item),
-        },
-      }),
+      ui(uiOptions),
       dash({
         qualityControl: false,
         textControl: false,
