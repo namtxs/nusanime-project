@@ -334,22 +334,24 @@ onBeforeUnmount(() => ambient.clearAmbient())
       <div class="watch-stage">
         <div class="watch-main">
           <ClientOnly>
-            <DashPlayer
-              v-if="streamUrl"
-              :uri="streamUrl"
-              :auto-play="store.autoPlay.value"
-              :initial-position="initialPosition"
-              :subtitles="subtitles"
-              preferred-subtitle-lang="id"
-              :qualities="qualities"
-              :selected-quality="selectedQuality"
-              :servers="SERVER_OPTIONS"
-              :selected-server="store.preferredServer.value"
-              @progress="onProgress"
-              @quality-change="onQualityChange"
-              @server-change="onServerChange"
-              @ended="playNext"
-            />
+            <ExtensionGate>
+              <DashPlayer
+                v-if="streamUrl"
+                :uri="streamUrl"
+                :auto-play="store.autoPlay.value"
+                :initial-position="initialPosition"
+                :subtitles="subtitles"
+                preferred-subtitle-lang="id"
+                :qualities="qualities"
+                :selected-quality="selectedQuality"
+                :servers="SERVER_OPTIONS"
+                :selected-server="store.preferredServer.value"
+                @progress="onProgress"
+                @quality-change="onQualityChange"
+                @server-change="onServerChange"
+                @ended="playNext"
+              />
+            </ExtensionGate>
             <template #fallback>
               <LoadingState message="Loading player…" />
             </template>

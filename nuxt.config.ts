@@ -8,6 +8,8 @@ export default defineNuxtConfig({
   runtimeConfig: {
     public: {
       apiOrigin: process.env.NUXT_PUBLIC_API_ORIGIN || 'http://localhost:8989',
+      extensionInstallUrl:
+        process.env.NUXT_PUBLIC_EXTENSION_INSTALL_URL || '/nusanime-extension.zip',
     },
   },
 
