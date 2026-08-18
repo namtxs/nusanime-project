@@ -1,12 +1,33 @@
+import { unmaskAesKey } from '~/utils/aesKeyMask'
 import { decryptResponse } from '~/utils/responseCipher'
+
+declare const __NUSA_A__: string | undefined
+declare const __NUSA_B__: string | undefined
+declare const __NUSA_C__: string | undefined
+declare const __NUSA_D__: string | undefined
 
 let apiOriginCache = ''
 let responseAesKeyCache = ''
 
+function bundledAesKey() {
+  try {
+    return unmaskAesKey([
+      typeof __NUSA_A__ === 'string' ? __NUSA_A__ : '',
+      typeof __NUSA_B__ === 'string' ? __NUSA_B__ : '',
+      typeof __NUSA_C__ === 'string' ? __NUSA_C__ : '',
+      typeof __NUSA_D__ === 'string' ? __NUSA_D__ : '',
+    ])
+  } catch {
+    return ''
+  }
+}
+
 export function hydrateApiConfig() {
   const config = useRuntimeConfig()
   apiOriginCache = String(config.public.apiOrigin || 'http://localhost:8989').replace(/\/$/, '')
-  responseAesKeyCache = String(config.public.responseAesKey || '')
+  responseAesKeyCache = import.meta.server
+    ? String(config.responseAesKey || bundledAesKey())
+    : bundledAesKey()
   return { origin: apiOriginCache, aesKey: responseAesKeyCache }
 }
 

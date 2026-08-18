@@ -1,3 +1,12 @@
+import { maskAesKey } from './app/utils/aesKeyMask'
+
+const responseAesKey =
+  process.env.NUXT_RESPONSE_AES_KEY ||
+  process.env.RESPONSE_AES_KEY ||
+  process.env.NUXT_PUBLIC_RESPONSE_AES_KEY ||
+  ''
+const maskedAesParts = maskAesKey(responseAesKey)
+
 // https://nuxt.com/docs/api/configuration/nuxt-config
 export default defineNuxtConfig({
   compatibilityDate: '2025-07-15',
@@ -6,11 +15,11 @@ export default defineNuxtConfig({
   css: ['~/assets/css/main.css'],
 
   runtimeConfig: {
+    responseAesKey,
     public: {
       apiOrigin: process.env.NUXT_PUBLIC_API_ORIGIN || 'http://localhost:8989',
       extensionInstallUrl:
         process.env.NUXT_PUBLIC_EXTENSION_INSTALL_URL || '/nusanime-extension.zip',
-      responseAesKey: process.env.NUXT_PUBLIC_RESPONSE_AES_KEY || '',
     },
   },
 
@@ -38,6 +47,12 @@ export default defineNuxtConfig({
   },
 
   vite: {
+    define: {
+      __NUSA_A__: JSON.stringify(maskedAesParts[0]),
+      __NUSA_B__: JSON.stringify(maskedAesParts[1]),
+      __NUSA_C__: JSON.stringify(maskedAesParts[2]),
+      __NUSA_D__: JSON.stringify(maskedAesParts[3]),
+    },
     optimizeDeps: {
       include: ['@oplayer/core', '@oplayer/ui', '@oplayer/dash', 'dashjs'],
     },
