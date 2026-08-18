@@ -24,8 +24,7 @@ function go(path: string, opts?: NavOpts) {
 /**
  * Route titles like Expo openTitle:
  * UGC → /video-ugc/:aid
- * Dracin → /video/:ep?seasonId=&source=dracin (web uses episode player; Expo uses feed)
- * OGV → /anime/:seasonId
+ * Dracin / OGV → /video/:ep?seasonId= (detail + player on one page)
  */
 export function openTitle(item: OpenableTitle, opts?: NavOpts) {
   if (isUgcCard(item)) {
@@ -37,14 +36,10 @@ export function openTitle(item: OpenableTitle, opts?: NavOpts) {
   }
 
   if (item.season_id != null && String(item.season_id).length > 0) {
-    if (isDracinCard(item) || item.source === 'dracin') {
-      void openSeasonPlay(item.season_id, {
-        source: 'dracin',
-        replace: opts?.replace,
-      }).catch((e) => console.error('Dracin open failed', e))
-      return
-    }
-    go(`/anime/${item.season_id}`, opts)
+    void openSeasonPlay(item.season_id, {
+      source: isDracinCard(item) || item.source === 'dracin' ? 'dracin' : undefined,
+      replace: opts?.replace,
+    }).catch((e) => console.error('Open season failed', e))
     return
   }
 
@@ -63,25 +58,30 @@ export async function openSeasonPlay(
   let episodeId = opts?.episodeId != null ? String(opts.episodeId) : ''
   let source = opts?.source || ''
 
+  if (!episodeId) {
+    const store = useAppStore()
+    store.hydrate()
+    const last = store.watchHistory.value.find((h) => String(h.season_id) === sid)
+    if (last?.episode_id) {
+      episodeId = String(last.episode_id)
+      if (!source && last.source) source = String(last.source)
+    }
+  }
+
   if (!episodeId || !source) {
     const detail = await contentService.getSeriesDetail(sid)
     if (!source && isDracinSeriesDetail(detail)) {
       source = 'dracin'
     }
     if (!episodeId) {
-      const episodes = extractEpisodes(detail)
-      const first = episodes[0]
+      const first = pickPlayableEpisode(extractEpisodes(detail))
       episodeId = first?.episode_id != null ? String(first.episode_id) : ''
     }
   }
 
-  if (!episodeId) {
-    throw new Error('No episode available for this title')
-  }
-
   const qs = new URLSearchParams({ seasonId: sid })
   if (source) qs.set('source', source)
-  go(`/video/${episodeId}?${qs.toString()}`, { replace: opts?.replace })
+  go(`/video/${episodeId || 'soon'}?${qs.toString()}`, { replace: opts?.replace })
 }
 
 export function openHistoryPlay(item: {

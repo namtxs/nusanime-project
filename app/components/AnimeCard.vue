@@ -142,7 +142,7 @@ function onImgError(e: Event) {
   height: 22px;
   padding: 0 6px;
   border-radius: 4px;
-  background: rgba(0, 0, 0, 0.82);
+  background: color-mix(in srgb, var(--accent) 72%, transparent);
   color: #fff;
   font-size: 0.75rem;
   font-weight: 800;
@@ -157,7 +157,7 @@ function onImgError(e: Event) {
   top: 6px;
   padding: 3px 7px;
   border-radius: 4px;
-  background: var(--accent);
+  background: color-mix(in srgb, var(--accent) 72%, transparent);
   color: #fff;
   font-size: 0.6875rem;
   font-weight: 800;
@@ -181,7 +181,7 @@ function onImgError(e: Event) {
   max-width: calc(100% - 12px);
   padding: 4px 7px;
   border-radius: 4px;
-  background: rgba(0, 0, 0, 0.88);
+  background: color-mix(in srgb, var(--accent) 72%, transparent);
   color: #fff;
   font-size: 0.6875rem;
   font-weight: 700;

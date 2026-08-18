@@ -279,6 +279,30 @@ export function unwrapRelated(payload: any): any[] {
   return unwrapAnimeCards(data).map(mapCardToAnime).filter(Boolean)
 }
 
+export function isPreviewEpisode(ep: any): boolean {
+  if (!ep) return false
+  if (Number(ep.preview) === 1 || ep.preview === true) return true
+  const text = [ep.short_title, ep.title, ep.long_title, ep.long_title_display]
+    .map((value) => String(value || ''))
+    .join(' ')
+  return /\bpv\b|preview|trailer|teaser/i.test(text)
+}
+
+export function isPlayableEpisode(ep: any): boolean {
+  if (ep?.episode_id == null || String(ep.episode_id).trim() === '') return false
+  if (ep.published === false || Number(ep.published) === 0) return isPreviewEpisode(ep)
+  return true
+}
+
+export function pickPlayableEpisode(episodes: any[]): any | undefined {
+  const list = (episodes || []).filter((ep) => ep?.episode_id != null)
+  return (
+    list.find((ep) => isPlayableEpisode(ep) && !isPreviewEpisode(ep)) ||
+    list.find((ep) => isPreviewEpisode(ep)) ||
+    list.find((ep) => isPlayableEpisode(ep))
+  )
+}
+
 export function extractEpisodes(detail: any): any[] {
   const eps: any[] = []
   const sections = detail?.sections?.section
@@ -362,13 +386,13 @@ export function normalizeSkip(skip: any): {
   if (!skip || typeof skip !== 'object') return {}
 
   if (skip.intro || skip.outro) {
+    const introStart = Number(skip.intro?.start) || 0
+    const introEnd = Number(skip.intro?.end) || 0
+    const outroStart = Number(skip.outro?.start) || 0
+    const outroEnd = Number(skip.outro?.end) || 0
     return {
-      intro: skip.intro
-        ? { start: Number(skip.intro.start) || 0, end: Number(skip.intro.end) || 0 }
-        : undefined,
-      outro: skip.outro
-        ? { start: Number(skip.outro.start) || 0, end: Number(skip.outro.end) || 0 }
-        : undefined,
+      intro: introEnd > introStart ? { start: introStart, end: introEnd } : undefined,
+      outro: outroEnd > outroStart ? { start: outroStart, end: outroEnd } : undefined,
     }
   }
 

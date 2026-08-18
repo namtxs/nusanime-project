@@ -1,7 +1,7 @@
 // https://nuxt.com/docs/api/configuration/nuxt-config
 export default defineNuxtConfig({
   compatibilityDate: '2025-07-15',
-  devtools: { enabled: true },
+  devtools: { enabled: false },
 
   css: ['~/assets/css/main.css'],
 
@@ -10,6 +10,7 @@ export default defineNuxtConfig({
       apiOrigin: process.env.NUXT_PUBLIC_API_ORIGIN || 'http://localhost:8989',
       extensionInstallUrl:
         process.env.NUXT_PUBLIC_EXTENSION_INSTALL_URL || '/nusanime-extension.zip',
+      responseAesKey: process.env.NUXT_PUBLIC_RESPONSE_AES_KEY || '',
     },
   },
 

@@ -7,7 +7,7 @@ store.hydrate()
 const items = computed(() => store.watchHistory.value)
 
 function cover(item: WatchHistoryItem) {
-  return proxiedImageUrl(pickHistoryImage(item.thumbnail, item.cover)) || ''
+  return proxiedImageUrl(pickHistoryImage(item.thumbnail, item.cover), 'landscape') || ''
 }
 
 function resume(item: WatchHistoryItem) {
