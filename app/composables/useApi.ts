@@ -1,6 +1,3 @@
-import { unmaskAesKey } from '~/utils/aesKeyMask'
-import { decryptResponse, isEncryptedEnvelope } from '~/utils/responseCipher'
-
 export function useApiOrigin() {
   const config = useRuntimeConfig()
   return String(config.public.apiOrigin || 'http://localhost:8989').replace(/\/$/, '')
@@ -22,36 +19,14 @@ export function getAbsoluteUrl(path: string) {
   return `${useApiOrigin()}${normalized}`
 }
 
-function resolveResponseAesKey() {
-  const config = useRuntimeConfig()
-  const serverKey = String(config.responseAesKey || '')
-  if (serverKey) return serverKey
-  const parts = config.public.aesKeyParts
-  return unmaskAesKey(Array.isArray(parts) ? parts : [])
-}
-
-async function unwrapApiPayload<T>(raw: T): Promise<T> {
-  if (!isEncryptedEnvelope(raw)) return raw
-  const key = resolveResponseAesKey()
-  if (!key) {
-    throw new Error('API terenkripsi, tapi NUXT_RESPONSE_AES_KEY belum di-set')
-  }
-  try {
-    return await decryptResponse(raw, key)
-  } catch {
-    throw new Error('Gagal mendekripsi respons API (kunci AES tidak cocok)')
-  }
-}
-
 export async function apiGet<T = unknown>(endpoint: string, opts?: { query?: Record<string, string | number | boolean | undefined> }) {
   const url = getFullUrl(endpoint)
   try {
-    const raw = await $fetch<T>(url, {
+    return await $fetch<T>(url, {
       method: 'GET',
       query: opts?.query,
       timeout: 30000,
     })
-    return await unwrapApiPayload(raw)
   } catch (err: any) {
     const message =
       err?.data?.message ||
