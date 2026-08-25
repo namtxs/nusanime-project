@@ -1,3 +1,6 @@
+import { unmaskAesKey } from '~/utils/aesKeyMask'
+import { decryptResponse, isEncryptedEnvelope } from '~/utils/responseCipher'
+
 export function useApiOrigin() {
   const config = useRuntimeConfig()
   return String(config.public.apiOrigin || 'http://localhost:8989').replace(/\/$/, '')
@@ -19,21 +22,40 @@ export function getAbsoluteUrl(path: string) {
   return `${useApiOrigin()}${normalized}`
 }
 
-export async function apiGet<T = unknown>(endpoint: string, opts?: { query?: Record<string, string | number | boolean | undefined> }) {
-  const path = endpoint.startsWith('/') ? endpoint : `/${endpoint}`
+function resolveResponseAesKey() {
+  const config = useRuntimeConfig()
+  const serverKey = String(config.responseAesKey || '')
+  if (serverKey) return serverKey
+  const parts = config.public.aesKeyParts
+  return unmaskAesKey(Array.isArray(parts) ? parts : [])
+}
+
+async function unwrapApiPayload<T>(raw: T): Promise<T> {
+  if (!isEncryptedEnvelope(raw)) return raw
+  const key = resolveResponseAesKey()
+  if (!key) {
+    throw new Error('API terenkripsi, tapi NUXT_RESPONSE_AES_KEY belum di-set')
+  }
   try {
-    // JSON goes through Nitro so NUXT_RESPONSE_AES_KEY (server-only) can decrypt.
-    // Stream/image URLs still use getFullUrl() → api origin directly.
-    return await $fetch<T>(`/api/_backend${path}`, {
+    return await decryptResponse(raw, key)
+  } catch {
+    throw new Error('Gagal mendekripsi respons API (kunci AES tidak cocok)')
+  }
+}
+
+export async function apiGet<T = unknown>(endpoint: string, opts?: { query?: Record<string, string | number | boolean | undefined> }) {
+  const url = getFullUrl(endpoint)
+  try {
+    const raw = await $fetch<T>(url, {
       method: 'GET',
       query: opts?.query,
       timeout: 30000,
     })
+    return await unwrapApiPayload(raw)
   } catch (err: any) {
     const message =
       err?.data?.message ||
       err?.data?.error ||
-      err?.statusMessage ||
       err?.message ||
       'Request failed'
     const error = new Error(message) as Error & { status?: number; data?: unknown }
