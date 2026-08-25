@@ -6,7 +6,7 @@ export default defineNuxtConfig({
   css: ['~/assets/css/main.css'],
 
   runtimeConfig: {
-    // NUXT_RESPONSE_AES_KEY — server only, used by server/api/_backend.
+    // NUXT_RESPONSE_AES_KEY — server only. Passed to the client as masked parts via plugin.
     responseAesKey: '',
     public: {
       apiOrigin: process.env.NUXT_PUBLIC_API_ORIGIN || 'http://localhost:8989',
