@@ -51,6 +51,15 @@ export interface SeriesDetail {
     desc?: { value?: string }
     union_info?: string[]
   }
+  stat?: {
+    views?: string
+    likes?: string
+    reply?: string
+  }
+  info?: {
+    play_num?: string
+    union_info?: string
+  }
   season_series?: Array<{ season_id: string; title: string }>
   seasons?: Array<{ season_id: string; title: string }>
   for_you?: { item_details?: unknown[] }
