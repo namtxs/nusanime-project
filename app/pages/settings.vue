@@ -68,7 +68,7 @@ function onServer(e: Event) {
           :checked="store.skipIntro.value"
           @change="store.setSkipIntro(($event.target as HTMLInputElement).checked)"
         >
-        <span>Skip intro (jika tersedia)</span>
+        <span>Skip intro & outro</span>
       </label>
     </section>
 

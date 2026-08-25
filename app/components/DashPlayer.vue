@@ -1,8 +1,5 @@
 <script setup lang="ts">
-import { Lock, LockOpen, Pause, Play, RotateCcw, RotateCw } from 'lucide-vue-next'
 import type { VideoQuality } from '~/types/anime'
-import { lucidePlayerIcons } from '~/utils/lucidePlayerIcons'
-import { decryptResponse, isEncryptedEnvelope } from '~/utils/responseCipher'
 
 export type DashSubtitleTrack = {
   url: string
@@ -12,19 +9,21 @@ export type DashSubtitleTrack = {
   type?: 'vtt' | 'srt' | 'ass' | 'auto'
 }
 
-type OPlayerSubtitleSource = {
+export type SkipRange = { start: number; end: number }
+export type SkipMarkers = {
+  intro?: SkipRange
+  outro?: SkipRange
+}
+
+type SubtitleSource = {
   name: string
   src: string
   type: 'vtt'
   default?: boolean
 }
 
-export type SkipRange = { start: number; end: number }
-
 const props = defineProps<{
   uri: string
-  title?: string
-  poster?: string
   autoPlay?: boolean
   initialPosition?: number
   subtitles?: DashSubtitleTrack[]
@@ -33,7 +32,7 @@ const props = defineProps<{
   selectedQuality?: number
   servers?: { key: string; label: string }[]
   selectedServer?: string
-  skip?: { intro?: SkipRange; outro?: SkipRange }
+  skip?: SkipMarkers
   autoSkip?: boolean
 }>()
 
@@ -45,275 +44,27 @@ const emit = defineEmits<{
   qualityChange: [key: number]
   serverChange: [key: string]
   playingChange: [playing: boolean]
-  skipChange: [enabled: boolean]
 }>()
 
 const hostRef = ref<HTMLDivElement | null>(null)
 let player: any = null
 let ready = false
 let applyingSubtitles = false
-let dashBlobUrl = ''
 let skippedIntro = false
 let skippedOutro = false
-const responseAesKey = getResponseAesKey()
-const skipCue = ref<'intro' | 'outro' | null>(null)
-const skipEnabled = ref(props.autoSkip !== false)
-const controlsLocked = ref(false)
-const showUnlockBtn = ref(false)
-const isPlaying = ref(false)
-const showCenterControls = ref(true)
-const playerRoot = ref<HTMLElement | null>(null)
-let unlockHideTimer = 0
-const SKIP_KEY = 'skip-intro'
-const SEEK_STEP = 10
+let skipKind: 'intro' | 'outro' | null = null
+let skipBtn: HTMLButtonElement | null = null
 
-function hasSkipData() {
-  const intro = props.skip?.intro
-  const outro = props.skip?.outro
-  return Boolean(
-    (intro && intro.end > intro.start) || (outro && outro.end > outro.start)
-  )
+function validRange(range?: SkipRange): SkipRange | null {
+  if (!range) return null
+  const start = Number(range.start)
+  const end = Number(range.end)
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start + 0.5) return null
+  return { start, end }
 }
 
-function buildSkipHighlights() {
-  const items: { time: number; text: string }[] = []
-  const intro = props.skip?.intro
-  const outro = props.skip?.outro
-  if (intro && intro.end > intro.start) {
-    items.push({ time: intro.start, text: 'Intro' })
-    items.push({ time: intro.end, text: 'Intro end' })
-  }
-  if (outro && outro.end > outro.start) {
-    items.push({ time: outro.start, text: 'Outro' })
-    items.push({ time: outro.end, text: 'Outro end' })
-  }
-  return items
-}
-
-function applyHighlights() {
-  try {
-    player?.context?.ui?.changHighlightSource?.(buildSkipHighlights())
-  } catch {
-    // ignore
-  }
-}
-
-function markSkipSettingState() {
-  const row = player?.$root?.querySelector(`[data-key="${SKIP_KEY}"]`) as HTMLElement | null
-  if (!row) return
-  if (hasSkipData()) {
-    row.removeAttribute('aria-disabled')
-    return
-  }
-  row.setAttribute('aria-disabled', 'true')
-  row.setAttribute('aria-checked', 'false')
-}
-
-function registerSkipSetting() {
-  const setting = player?.context?.ui?.setting
-  if (!setting) return
-
-  try {
-    setting.unregister(SKIP_KEY)
-  } catch {
-    // ignore
-  }
-
-  const available = hasSkipData()
-  setting.register({
-    name: available ? 'Skip intro/outro' : 'Skip intro/outro',
-    key: SKIP_KEY,
-    type: 'switcher',
-    default: available && skipEnabled.value,
-    onChange(value: boolean) {
-      if (!hasSkipData()) {
-        markSkipSettingState()
-        showNotice('Skip data tidak tersedia')
-        return
-      }
-      skipEnabled.value = value
-      emit('skipChange', value)
-      showNotice(value ? 'Skip intro on' : 'Skip intro off')
-    },
-  })
-
-  window.setTimeout(markSkipSettingState, 0)
-}
-
-function resetSkipState() {
-  skippedIntro = false
-  skippedOutro = false
-  skipCue.value = null
-}
-
-function inSkipRange(time: number, range?: SkipRange) {
-  if (!range) return false
-  return time >= range.start && time < range.end - 1
-}
-
-function showNotice(message: string) {
-  try {
-    player?.context?.ui?.notice?.(message)
-  } catch {
-    // ignore
-  }
-}
-
-function seekBy(delta: number) {
-  if (!player || controlsLocked.value || player.hasError) return
-  const duration = Number(player.duration) || 0
-  const current = Number(player.currentTime) || 0
-  const next =
-    duration > 0
-      ? Math.min(Math.max(0, current + delta), duration)
-      : Math.max(0, current + delta)
-  player.seek(next)
-  showNotice(delta < 0 ? '−10s' : '+10s')
-}
-
-function onLockKeydown(e: KeyboardEvent) {
-  if (!controlsLocked.value) return
-  const key = e.key
-  if (
-    key === ' ' ||
-    key === 'Escape' ||
-    /^(ArrowUp|ArrowDown|ArrowLeft|ArrowRight|[kKfFwWmMsS])$/.test(key)
-  ) {
-    e.preventDefault()
-    e.stopImmediatePropagation()
-  }
-}
-
-function clearUnlockHideTimer() {
-  if (!unlockHideTimer) return
-  window.clearTimeout(unlockHideTimer)
-  unlockHideTimer = 0
-}
-
-function revealUnlock() {
-  if (!controlsLocked.value) return
-  showUnlockBtn.value = true
-  clearUnlockHideTimer()
-  unlockHideTimer = window.setTimeout(() => {
-    showUnlockBtn.value = false
-    unlockHideTimer = 0
-  }, 2000)
-}
-
-function hideUnlockSoon() {
-  clearUnlockHideTimer()
-  unlockHideTimer = window.setTimeout(() => {
-    showUnlockBtn.value = false
-    unlockHideTimer = 0
-  }, 300)
-}
-
-function setControlsLocked(locked: boolean) {
-  controlsLocked.value = locked
-  showCenterControls.value = !locked
-  showUnlockBtn.value = false
-  clearUnlockHideTimer()
-  const root = player?.$root as HTMLElement | undefined
-  if (root) {
-    root.classList.toggle('nusa-locked', locked)
-    root.setAttribute('data-nusa-locked', locked ? 'true' : 'false')
-  }
-  if (locked) {
-    skipCue.value = null
-    try {
-      player?.$root?.setAttribute('data-ctrl-hidden', 'true')
-    } catch {
-      // ignore
-    }
-    showNotice('Player locked')
-  } else {
-    showNotice('Player unlocked')
-  }
-}
-
-function unlockPlayer() {
-  setControlsLocked(false)
-}
-
-function togglePlay() {
-  if (!player || controlsLocked.value) return
-  player.togglePlay()
-}
-
-function skipTo(range?: SkipRange, asEnded = false) {
-  if (!range || !player) return
-  if (asEnded) {
-    showNotice('Outro skipped')
-    emit('ended')
-    return
-  }
-  player.seek(Math.max(0, range.end))
-  showNotice('Intro skipped')
-}
-
-function handleSkip(time: number) {
-  const intro = props.skip?.intro
-  const outro = props.skip?.outro
-
-  if (inSkipRange(time, intro) && !skippedIntro) {
-    if (skipEnabled.value) {
-      skippedIntro = true
-      skipCue.value = null
-      skipTo(intro)
-      return
-    }
-    if (controlsLocked.value) return
-    skipCue.value = 'intro'
-    return
-  }
-
-  if (inSkipRange(time, outro) && !skippedOutro) {
-    if (controlsLocked.value) return
-    skipCue.value = 'outro'
-    return
-  }
-
-  if (skipCue.value === 'intro' && !inSkipRange(time, intro)) skipCue.value = null
-  if (skipCue.value === 'outro' && !inSkipRange(time, outro)) skipCue.value = null
-}
-
-function onSkipClick() {
-  if (skipCue.value === 'intro') {
-    skippedIntro = true
-    skipTo(props.skip?.intro)
-  } else if (skipCue.value === 'outro') {
-    skippedOutro = true
-    skipTo(props.skip?.outro, true)
-  }
-  skipCue.value = null
-}
-
-function revokeDashBlob() {
-  if (!dashBlobUrl) return
-  URL.revokeObjectURL(dashBlobUrl)
-  dashBlobUrl = ''
-}
-
-async function resolveDashSource(uri: string): Promise<string> {
-  const raw = await $fetch<unknown>(uri, { timeout: 30000 })
-
-  if (typeof raw === 'string' && raw.includes('<MPD')) {
-    return uri
-  }
-
-  const xml = await decryptResponse(raw, responseAesKey)
-  if (typeof xml === 'string' && xml.includes('<MPD')) {
-    revokeDashBlob()
-    const blob = new Blob([xml], { type: 'application/dash+xml' })
-    dashBlobUrl = URL.createObjectURL(blob)
-    return dashBlobUrl
-  }
-
-  if (isEncryptedEnvelope(raw) && !responseAesKey) {
-    throw new Error('Missing NUXT_PUBLIC_RESPONSE_AES_KEY')
-  }
-
-  return uri
+function inRange(range: SkipRange, time: number, pad = 0.4) {
+  return time >= range.start && time < range.end - pad
 }
 
 function pickPreferredSubtitle(
@@ -331,13 +82,11 @@ function pickPreferredSubtitle(
   )
 }
 
-/** OPlayer SubtitleSource — registered in Settings → Subtitle */
-function buildSubtitleSources(): OPlayerSubtitleSource[] {
+function buildSubtitleSources(): SubtitleSource[] {
   const tracks = (props.subtitles || []).filter((s) => !!s.url)
   if (!tracks.length) return []
 
   const preferred = pickPreferredSubtitle(tracks, props.preferredSubtitleLang || 'id')
-
   const sources = tracks.map((track) => ({
     name: track.label || track.language || 'Subtitle',
     src: track.url,
@@ -345,14 +94,11 @@ function buildSubtitleSources(): OPlayerSubtitleSource[] {
     default: preferred ? track.url === preferred.url : !!track.isDefault,
   }))
 
-  if (!sources.some((s) => s.default)) {
-    sources[0].default = true
-  }
-
+  if (!sources.some((s) => s.default)) sources[0].default = true
   return sources
 }
 
-async function loadSubtitleText(source: OPlayerSubtitleSource) {
+async function loadSubtitleText(source: SubtitleSource) {
   const res = await fetch(source.src)
   if (!res.ok) throw new Error(`fetch failed (${res.status})`)
   const text = (await res.text()).replace(/^\uFEFF/, '').replace(/\r\n/g, '\n')
@@ -360,74 +106,27 @@ async function loadSubtitleText(source: OPlayerSubtitleSource) {
   return /^WEBVTT/m.test(text) ? text : `WEBVTT\n\n${text}`
 }
 
-const MENU_SUBTITLE = 'Subtitle'
-const MENU_QUALITY = 'Quality'
-const MENU_SERVER = 'Server'
+const QUALITY_KEY = 'quality'
+const SERVER_KEY = 'server'
 
-function detachSettingEntries() {
+function registerPlayerSettings() {
   const setting = player?.context?.ui?.setting
   if (!setting) return
-  for (const key of [MENU_SUBTITLE, 'quality', 'server', MENU_QUALITY, MENU_SERVER]) {
-    try {
-      setting.unregister(key)
-    } catch {
-      // ignore
-    }
-  }
-}
-
-function registerPlayerMenus() {
-  const ui = player?.context?.ui
-  if (!ui?.menu) return
-
-  detachSettingEntries()
 
   try {
-    ui.menu.unregister(MENU_SUBTITLE)
-    ui.menu.unregister(MENU_QUALITY)
-    ui.menu.unregister(MENU_SERVER)
+    setting.unregister(QUALITY_KEY)
+    setting.unregister(SERVER_KEY)
   } catch {
     // ignore
   }
 
-  const tracks = buildSubtitleSources()
-  if (tracks.length) {
-    const currentSrc = ui.subtitle?.currentSubtitle?.src
-    ui.menu.register({
-      name: MENU_SUBTITLE,
-      icon: ui.icons?.subtitle,
-      position: 'bottom',
-      children: [
-        { name: 'Off', default: !currentSrc, value: null },
-        ...tracks.map((track) => ({
-          name: track.name,
-          default: currentSrc ? currentSrc === track.src : !!track.default,
-          value: track,
-        })),
-      ],
-      onChange(item: { value?: OPlayerSubtitleSource | null }) {
-        const sub = ui.subtitle
-        if (!item?.value) {
-          sub?.hide?.()
-          return
-        }
-        if (item.value.src === sub?.currentSubtitle?.src) {
-          sub.show?.()
-          return
-        }
-        sub.currentSubtitle = item.value
-        if (sub.$dom) sub.$dom.innerHTML = ''
-        void sub.fetchSubtitle?.()
-      },
-    })
-  }
-
   const qualities = (props.qualities || []).filter((q) => q && (q.text || q.key != null))
   if (qualities.length) {
-    ui.menu.register({
-      name: MENU_QUALITY,
-      icon: ui.icons?.quality,
-      position: 'bottom',
+    setting.register({
+      name: 'Quality',
+      key: QUALITY_KEY,
+      type: 'selector',
+      icon: player.context.ui.icons?.quality,
       children: qualities.map((q) => ({
         name: String(q.text || `Level ${q.key}`),
         value: q.key,
@@ -442,10 +141,11 @@ function registerPlayerMenus() {
 
   const servers = (props.servers || []).filter((s) => s?.key && s?.label)
   if (servers.length) {
-    ui.menu.register({
-      name: MENU_SERVER,
-      icon: ui.icons?.lang,
-      position: 'bottom',
+    setting.register({
+      name: 'Server',
+      key: SERVER_KEY,
+      type: 'selector',
+      icon: player.context.ui.icons?.lang,
       children: servers.map((s) => ({
         name: s.label,
         value: s.key,
@@ -461,14 +161,7 @@ function registerPlayerMenus() {
 function applySubtitles() {
   const sources = buildSubtitleSources()
   const sub = player?.context?.ui?.subtitle
-  if (!sub || applyingSubtitles) {
-    registerPlayerMenus()
-    return
-  }
-  if (!sources.length) {
-    registerPlayerMenus()
-    return
-  }
+  if (!sub || applyingSubtitles || !sources.length) return
 
   applyingSubtitles = true
   try {
@@ -479,7 +172,6 @@ function applySubtitles() {
     applyingSubtitles = false
   }
 
-  // dash.js strips <track>; OPlayer only calls show() on track "load".
   window.setTimeout(() => {
     try {
       const current = player?.context?.ui?.subtitle
@@ -496,64 +188,143 @@ function applySubtitles() {
       // ignore
     }
   }, 400)
+}
 
-  detachSettingEntries()
-  registerPlayerMenus()
+function applySkipHighlights() {
+  const ui = player?.context?.ui
+  if (!ui?.changHighlightSource) return
+  const marks: { text: string; time: number }[] = []
+  const intro = validRange(props.skip?.intro)
+  const outro = validRange(props.skip?.outro)
+  if (intro) marks.push({ text: 'OP', time: intro.start })
+  if (outro) marks.push({ text: 'ED', time: outro.start })
+  try {
+    ui.changHighlightSource(marks)
+  } catch {
+    // ignore
+  }
+}
+
+function ensureSkipButton() {
+  if (skipBtn || !player?.$root) return
+  skipBtn = document.createElement('button')
+  skipBtn.type = 'button'
+  skipBtn.className = 'nusa-skip'
+  skipBtn.hidden = true
+  skipBtn.addEventListener('click', (event) => {
+    event.stopPropagation()
+    if (skipKind === 'intro') skipIntroNow()
+    else if (skipKind === 'outro') skipOutroNow()
+  })
+  player.$root.appendChild(skipBtn)
+}
+
+function hideSkip() {
+  skipKind = null
+  if (skipBtn) {
+    skipBtn.hidden = true
+    skipBtn.textContent = ''
+  }
+}
+
+function showSkip(kind: 'intro' | 'outro') {
+  ensureSkipButton()
+  skipKind = kind
+  if (!skipBtn) return
+  skipBtn.hidden = false
+  skipBtn.textContent = kind === 'intro' ? 'Skip intro' : 'Skip outro'
+}
+
+function skipIntroNow() {
+  const intro = validRange(props.skip?.intro)
+  if (!intro || !player) return
+  skippedIntro = true
+  hideSkip()
+  player.seek(intro.end)
+  try {
+    player.context?.ui?.notice?.('Intro skipped')
+  } catch {
+    // ignore
+  }
+}
+
+function skipOutroNow() {
+  if (!player) return
+  skippedOutro = true
+  hideSkip()
+  const duration = Number(player.duration) || 0
+  if (duration > 0) player.seek(Math.max(0, duration - 0.05))
+  else emit('ended')
+}
+
+function resetSkipState() {
+  skippedIntro = false
+  skippedOutro = false
+  hideSkip()
+}
+
+function handleSkip(time: number) {
+  const intro = validRange(props.skip?.intro)
+  const outro = validRange(props.skip?.outro)
+
+  if (intro && time >= intro.end - 0.15) skippedIntro = true
+  if (outro && time >= outro.end - 0.15) skippedOutro = true
+
+  const inIntro = !!(intro && !skippedIntro && inRange(intro, time))
+  const inOutro = !!(outro && !skippedOutro && inRange(outro, time))
+
+  if (props.autoSkip !== false) {
+    if (inIntro) {
+      skipIntroNow()
+      return
+    }
+    if (inOutro) {
+      skipOutroNow()
+      return
+    }
+    hideSkip()
+    return
+  }
+
+  if (inIntro) showSkip('intro')
+  else if (inOutro) showSkip('outro')
+  else hideSkip()
 }
 
 async function boot() {
   if (!hostRef.value || !import.meta.client || !props.uri) return
 
   const [{ default: Player }, { default: ui }, { default: dash }] = await Promise.all([
-    import('@oplayer/core'),
-    import('@oplayer/ui'),
-    import('@oplayer/dash'),
+    import('@nusaplayer/core'),
+    import('@nusaplayer/ui'),
+    import('@nusaplayer/dash'),
   ])
 
   const sources = buildSubtitleSources()
   const uiOptions: Record<string, unknown> = {
-    theme: {
-      primaryColor: '#9147ff',
-      controller: {
-        header: true,
-        coverButton: false,
-      },
-      progress: {
-        backward: SEEK_STEP,
-        forward: SEEK_STEP,
-      },
-    },
-    highlight: {
-      color: '#fff',
-      source: buildSkipHighlights(),
-    },
-    icons: lucidePlayerIcons,
+    theme: { primaryColor: '#9147ff' },
   }
   if (sources.length) {
     uiOptions.subtitle = {
       source: sources,
       background: false,
-      fontSize: 22,
-      fontFamily: '"Arial Black", "Arial Bold", Arial, sans-serif',
+      fontSize: 28,
       bottom: '8%',
       marginBottom: '3.4em',
       shadow:
-        '-2px -2px 0 #3a1570, 2px -2px 0 #3a1570, -2px 2px 0 #3a1570, 2px 2px 0 #3a1570, -2px 0 0 #3a1570, 2px 0 0 #3a1570, 0 -2px 0 #3a1570, 0 2px 0 #3a1570',
-      onChange: (item: OPlayerSubtitleSource) => loadSubtitleText(item),
+        '-2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 2px 2px 0 #000, -2px 0 0 #000, 2px 0 0 #000, 0 -2px 0 #000, 0 2px 0 #000',
+      onChange: (item: SubtitleSource) => loadSubtitleText(item),
     }
   }
 
-  const src = await resolveDashSource(props.uri)
-
   player = Player.make(hostRef.value, {
     source: {
-      src,
+      src: props.uri,
       format: 'dash',
-      title: props.title || '',
-      poster: props.poster || '',
     },
     autoplay: props.autoPlay !== false,
-    crossorigin: true,
+    lang: 'id',
+    videoAttr: { crossorigin: 'anonymous' },
   })
     .use([
       ui(uiOptions),
@@ -576,70 +347,30 @@ async function boot() {
     ])
     .create()
 
-  registerPlayerMenus()
-  registerSkipSetting()
-  applyHighlights()
-  playerRoot.value = player.$root
-  document.addEventListener('keydown', onLockKeydown, true)
-
-  player.on('play', () => {
-    isPlaying.value = true
-  })
-  player.on('pause', () => {
-    if (controlsLocked.value) {
-      player.play?.()
-      return
-    }
-    isPlaying.value = false
-  })
-  player.on('controlsshown', () => {
-    if (controlsLocked.value) {
-      showCenterControls.value = false
-      player.$root?.setAttribute('data-ctrl-hidden', 'true')
-      return
-    }
-    showCenterControls.value = true
-  })
-  player.on('controlshidden', () => {
-    showCenterControls.value = false
-  })
-
-  player.context?.ui?.keyboard?.register?.({
-    ARROWLEFT: () => seekBy(-SEEK_STEP),
-    ARROWRIGHT: () => seekBy(SEEK_STEP),
-    ' ': () => {
-      if (!controlsLocked.value) player.togglePlay()
-    },
-    K: () => {
-      if (!controlsLocked.value) player.togglePlay()
-    },
-  })
+  ensureSkipButton()
+  registerPlayerSettings()
+  applySkipHighlights()
 
   player.on('loadedmetadata', () => {
     if (!ready && props.initialPosition && props.initialPosition > 1) {
       player.seek(props.initialPosition)
     }
     ready = true
+    registerPlayerSettings()
     applySubtitles()
-    applyHighlights()
+    applySkipHighlights()
     emit('ready')
   })
 
-  // Subtitle.destroy() is bound to videosourcechange — restore after dash attaches.
-  player.on('videosourcechanged', () => {
-    window.setTimeout(() => {
-      applySubtitles()
-      applyHighlights()
-    }, 0)
-  })
+  const restoreSubtitles = () => window.setTimeout(applySubtitles, 0)
+  player.on('videosourcechange', restoreSubtitles)
+  player.on('videosourcechanged', restoreSubtitles)
 
   player.on('timeupdate', () => {
     const currentTime = player.currentTime || 0
+    const duration = player.duration || 0
+    emit('progress', { currentTime, duration })
     handleSkip(currentTime)
-    emit('progress', {
-      currentTime,
-      duration: player.duration || 0,
-    })
   })
 
   player.on('ended', () => emit('ended'))
@@ -655,9 +386,8 @@ async function boot() {
 }
 
 function hardStop() {
-  clearUnlockHideTimer()
-  showUnlockBtn.value = false
-  document.removeEventListener('keydown', onLockKeydown, true)
+  skipBtn = null
+  skipKind = null
   if (!player) return
   try {
     player.pause?.()
@@ -670,47 +400,18 @@ function hardStop() {
     // ignore
   }
   player = null
-  playerRoot.value = null
   ready = false
-  controlsLocked.value = false
-  isPlaying.value = false
-  showCenterControls.value = true
-  resetSkipState()
-  revokeDashBlob()
 }
-
-function applySourceMeta() {
-  if (!player) return
-  if (props.poster) player.setPoster?.(props.poster)
-  const titleEl = hostRef.value?.querySelector<HTMLElement>('.oplayer h2')
-  if (titleEl) titleEl.textContent = props.title || ''
-}
-
-watch(
-  () => [props.title, props.poster] as const,
-  () => {
-    applySourceMeta()
-  }
-)
 
 watch(
   () => props.uri,
   async (url) => {
+    resetSkipState()
     if (!player || !url) return
     try {
-      resetSkipState()
-      const src = await resolveDashSource(url)
-      await player.changeSource(
-        {
-          src,
-          format: 'dash',
-          title: props.title || '',
-          poster: props.poster || '',
-        },
-        true
-      )
+      await player.changeSource({ src: url, format: 'dash' }, true)
       applySubtitles()
-      applyHighlights()
+      applySkipHighlights()
     } catch (e: any) {
       emit('error', e?.message || 'Failed to switch stream')
     }
@@ -719,32 +420,21 @@ watch(
 
 watch(
   () => props.subtitles,
-  () => {
-    applySubtitles()
-  },
+  () => applySubtitles(),
   { deep: true }
 )
 
 watch(
   () => [props.qualities, props.selectedQuality, props.servers, props.selectedServer] as const,
-  () => {
-    registerPlayerMenus()
-  },
+  () => registerPlayerSettings(),
   { deep: true }
 )
 
 watch(
-  () => props.autoSkip,
-  (value) => {
-    skipEnabled.value = value !== false
-  }
-)
-
-watch(
-  () => [props.skip, skipEnabled.value] as const,
+  () => props.skip,
   () => {
-    registerSkipSetting()
-    applyHighlights()
+    resetSkipState()
+    applySkipHighlights()
   },
   { deep: true }
 )
@@ -767,290 +457,17 @@ defineExpose({
 </script>
 
 <template>
-  <div
-    class="player-wrap"
-    :class="{ 'is-locked': controlsLocked }"
-  >
+  <div class="player-wrap">
     <div ref="hostRef" class="player-host" />
-    <Teleport
-      v-if="playerRoot"
-      :to="playerRoot"
-    >
-      <div
-        v-show="showCenterControls && !controlsLocked"
-        class="center-controls"
-      >
-        <button
-          type="button"
-          class="center-btn center-lock"
-          aria-label="Lock player"
-          @click.stop="setControlsLocked(true)"
-        >
-          <Lock
-            :size="22"
-            :stroke-width="2.25"
-            aria-hidden="true"
-          />
-        </button>
-        <div class="center-cluster">
-          <button
-            type="button"
-            class="center-btn seek-btn"
-            aria-label="Rewind 10 seconds"
-            @click.stop="seekBy(-SEEK_STEP)"
-          >
-            <span class="seek-glyph">
-              <RotateCcw
-                :size="44"
-                :stroke-width="2.25"
-                aria-hidden="true"
-              />
-              <span class="seek-num">10</span>
-            </span>
-          </button>
-          <button
-            type="button"
-            class="center-btn center-play"
-            :aria-label="isPlaying ? 'Pause' : 'Play'"
-            @click.stop="togglePlay"
-          >
-            <Pause
-              v-if="isPlaying"
-              :size="36"
-              :stroke-width="2.25"
-              aria-hidden="true"
-            />
-            <Play
-              v-else
-              :size="36"
-              :stroke-width="2.25"
-              aria-hidden="true"
-            />
-          </button>
-          <button
-            type="button"
-            class="center-btn seek-btn"
-            aria-label="Forward 10 seconds"
-            @click.stop="seekBy(SEEK_STEP)"
-          >
-            <span class="seek-glyph">
-              <RotateCw
-                :size="44"
-                :stroke-width="2.25"
-                aria-hidden="true"
-              />
-              <span class="seek-num">10</span>
-            </span>
-          </button>
-        </div>
-      </div>
-      <div
-        v-show="controlsLocked"
-        class="lock-shield"
-        :class="{ 'is-reveal': showUnlockBtn }"
-        @pointermove="revealUnlock"
-        @pointerleave="hideUnlockSoon"
-        @click.stop.prevent="revealUnlock"
-        @dblclick.stop.prevent
-      >
-        <button
-          type="button"
-          class="center-btn center-lock unlock-btn"
-          aria-label="Unlock player"
-          @click.stop="unlockPlayer"
-        >
-          <LockOpen
-            :size="22"
-            :stroke-width="2.25"
-            aria-hidden="true"
-          />
-        </button>
-      </div>
-    </Teleport>
-    <button
-      v-if="skipCue && !controlsLocked"
-      type="button"
-      class="skip-btn"
-      @click="onSkipClick"
-    >
-      {{ skipCue === 'intro' ? 'Skip intro' : 'Skip outro' }}
-    </button>
   </div>
 </template>
 
 <style scoped>
 .player-wrap {
-  position: relative;
   width: 100%;
   background: #000;
   border-radius: var(--radius-md);
   overflow: hidden;
-}
-
-.skip-btn {
-  position: absolute;
-  right: 16px;
-  bottom: 64px;
-  z-index: 12;
-  border: 0;
-  border-radius: 6px;
-  padding: 10px 14px;
-  background: rgba(20, 20, 20, 0.88);
-  color: #fff;
-  font-size: 0.8125rem;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  cursor: pointer;
-}
-
-.skip-btn:hover {
-  background: #fff;
-  color: #111;
-}
-
-.center-controls,
-.lock-shield {
-  position: absolute;
-  inset: 0;
-  z-index: 9;
-  pointer-events: none;
-}
-
-.lock-shield {
-  z-index: 99;
-  pointer-events: auto;
-  cursor: default;
-}
-
-.center-cluster {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 96px;
-  pointer-events: none;
-}
-
-.center-btn {
-  pointer-events: auto;
-  display: grid;
-  place-items: center;
-  width: 64px;
-  height: 64px;
-  border: 0;
-  border-radius: 50%;
-  padding: 0;
-  background: rgba(20, 20, 20, 0.55);
-  color: #fff;
-  cursor: pointer;
-  transition: transform 0.15s ease, background-color 0.15s ease;
-}
-
-.center-lock,
-.unlock-btn {
-  position: absolute;
-  left: 16px;
-  top: 50%;
-  width: 40px;
-  height: 40px;
-  background: rgba(20, 20, 20, 0.28);
-  transform: translateY(-50%);
-}
-
-.center-lock :deep(svg),
-.unlock-btn :deep(svg) {
-  width: 22px;
-  height: 22px;
-  display: block;
-}
-
-.seek-btn {
-  width: 52px;
-  height: 52px;
-  background: rgba(20, 20, 20, 0.28);
-}
-
-.seek-glyph {
-  position: relative;
-  display: grid;
-  place-items: center;
-  width: 44px;
-  height: 44px;
-}
-
-.seek-glyph :deep(svg) {
-  display: block;
-  width: 44px;
-  height: 44px;
-}
-
-.seek-num {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  font-size: 12px;
-  font-weight: 800;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: -0.05em;
-  line-height: 1;
-  pointer-events: none;
-}
-
-.center-play {
-  width: 80px;
-  height: 80px;
-  background: rgba(145, 71, 255, 0.92);
-}
-
-.center-play :deep(svg) {
-  width: 36px;
-  height: 36px;
-  display: block;
-}
-
-.center-btn:hover {
-  background: rgba(20, 20, 20, 0.45);
-}
-
-.seek-btn:hover {
-  background: rgba(20, 20, 20, 0.4);
-}
-
-.center-lock:hover,
-.unlock-btn:hover {
-  background: rgba(20, 20, 20, 0.4);
-  transform: translateY(-50%) scale(1.06);
-}
-
-.seek-btn:hover,
-.center-play:hover {
-  transform: scale(1.06);
-}
-
-.center-play:hover {
-  background: rgb(145, 71, 255);
-}
-
-.unlock-btn {
-  cursor: pointer;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.2s ease, transform 0.15s ease, background-color 0.15s ease;
-}
-
-.lock-shield:hover .unlock-btn,
-.lock-shield.is-reveal .unlock-btn {
-  opacity: 1;
-  pointer-events: auto;
-}
-
-.player-host :deep(.nusa-locked > div:not(.lock-shield):not(.center-controls) > *:not([aria-label='Subtitle'])),
-.is-locked .player-host :deep(.oplayer > div:not(.lock-shield):not(.center-controls) > *:not([aria-label='Subtitle'])) {
-  opacity: 0 !important;
-  visibility: hidden !important;
-  pointer-events: none !important;
 }
 
 .player-host {
@@ -1059,61 +476,42 @@ defineExpose({
   background: #000;
 }
 
-.player-host :deep(.oplayer) {
+.player-host :deep(:first-child) {
   width: 100%;
   height: 100%;
 }
 
-.player-host :deep(.oplayer button:not(.center-btn) svg) {
-  fill: none;
-  stroke: currentColor;
-  width: 1.2em;
-  height: 1.2em;
-  display: block;
-  margin: auto;
-}
-
-.player-host :deep(.oplayer h2) {
-  font-size: 0.95rem;
-  font-weight: 650;
-  letter-spacing: -0.01em;
-}
-
-.player-host :deep(.oplayer > [aria-label='Subtitle']),
-.player-host :deep(.oplayer > [aria-label='Subtitle'] p),
-.player-host :deep(.oplayer > [aria-label='Subtitle'] span) {
+.player-host :deep([aria-label='Subtitle']) {
   z-index: 8;
-  font-family: 'Arial Black', 'Arial Bold', Arial, sans-serif !important;
-  font-weight: 900 !important;
-  -webkit-text-stroke: 0.55px #3a1570;
-  paint-order: stroke fill;
+  font-weight: 700;
 }
 
-.player-host :deep(.oplayer > [aria-label='Subtitle'] span) {
+.player-host :deep([aria-label='Subtitle'] span) {
   background: transparent !important;
+  padding: 0;
 }
 
-.player-host :deep([data-dropdown-pos] [role='menu']) {
-  min-width: 13em;
-  width: max-content;
-  max-width: 18rem;
-  padding: 0.4em 0;
-  box-sizing: border-box;
+.player-host :deep(.nusa-skip) {
+  position: absolute;
+  right: 16px;
+  bottom: 72px;
+  z-index: 30;
+  width: auto;
+  height: auto;
+  border: 0;
+  border-radius: 999px;
+  padding: 8px 16px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #fff;
+  background: rgba(20, 20, 24, 0.82);
+  backdrop-filter: blur(8px);
+  cursor: pointer;
 }
 
-.player-host :deep([data-key='skip-intro'][aria-disabled='true']) {
-  opacity: 0.38;
-  pointer-events: none;
-  cursor: not-allowed;
-}
-
-.player-host :deep([data-dropdown-pos] [role='menuitemradio']) {
-  min-width: 13em;
-  padding: 0 0.9em !important;
-  text-align: left !important;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  word-break: normal;
+.player-host :deep(.nusa-skip:hover) {
+  background: #9147ff;
 }
 </style>

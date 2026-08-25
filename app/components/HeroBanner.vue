@@ -32,7 +32,7 @@ function itemId(item: FeaturedItem, i: number) {
 }
 
 function coverOf(item: FeaturedItem) {
-  return getBackdropImageUrl(item.cover)
+  return proxiedImageUrl(item.cover) || ''
 }
 
 function isInList(item: FeaturedItem) {

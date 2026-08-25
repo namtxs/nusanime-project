@@ -22,19 +22,18 @@ const related = ref<any[]>([])
 const initialPosition = ref(0)
 
 const title = computed(() => asDisplayText(detail.value?.title) || 'Video')
-const playerPoster = computed(() =>
-  getBackdropImageUrl(pickHistoryImage(detail.value?.cover, detail.value?.pic, detail.value?.square_cover))
-)
 const ownerName = computed(() =>
   asDisplayText(detail.value?.owner?.name || detail.value?.owner?.uname)
+)
+const views = computed(() =>
+  asDisplayText(detail.value?.stat_format?.view_count || detail.value?.stat?.view)
 )
 const desc = computed(() => asDisplayText(detail.value?.desc))
 
 function relatedCover(item: any) {
   return (
     proxiedImageUrl(
-      item.cover || item.horizontal_cover || item.square_cover || item.pic,
-      'landscape'
+      item.cover || item.horizontal_cover || item.square_cover || item.pic
     ) || ''
   )
 }
@@ -123,9 +122,7 @@ watch(videoId, () => {
 
 watch(detail, (data) => {
   if (!data) return
-  ambient.setAmbient(
-    getBackdropImageUrl(pickHistoryImage(data.cover, data.pic, data.square_cover))
-  )
+  ambient.setAmbient(pickHistoryImage(data.cover, data.pic, data.square_cover))
 })
 
 onBeforeUnmount(() => ambient.clearAmbient())
@@ -133,6 +130,20 @@ onBeforeUnmount(() => ambient.clearAmbient())
 
 <template>
   <div class="page watch">
+    <header class="watch-head">
+      <p
+        v-if="ownerName || views"
+        class="watch-show"
+      >
+        <span v-if="ownerName">{{ ownerName }}</span>
+        <span v-if="ownerName && views"> · </span>
+        <span v-if="views">{{ views }} views</span>
+      </p>
+      <h1 class="watch-title">
+        {{ title }}
+      </h1>
+    </header>
+
     <LoadingState v-if="loading" />
     <ErrorState
       v-else-if="error"
@@ -147,8 +158,6 @@ onBeforeUnmount(() => ambient.clearAmbient())
               <DashPlayer
                 v-if="streamUrl"
                 :uri="streamUrl"
-                :title="title"
-                :poster="playerPoster"
                 :auto-play="store.autoPlay.value"
                 :initial-position="initialPosition"
                 :qualities="qualities"
@@ -222,6 +231,24 @@ onBeforeUnmount(() => ambient.clearAmbient())
 <style scoped>
 .watch {
   padding-top: 20px;
+}
+
+.watch-head {
+  margin-bottom: 14px;
+}
+
+.watch-show {
+  margin: 0 0 4px;
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.watch-title {
+  margin: 0;
+  font-size: 1.375rem;
+  font-weight: 750;
+  line-height: 1.25;
 }
 
 .watch-stage {

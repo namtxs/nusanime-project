@@ -279,30 +279,6 @@ export function unwrapRelated(payload: any): any[] {
   return unwrapAnimeCards(data).map(mapCardToAnime).filter(Boolean)
 }
 
-export function isPreviewEpisode(ep: any): boolean {
-  if (!ep) return false
-  if (Number(ep.preview) === 1 || ep.preview === true) return true
-  const text = [ep.short_title, ep.title, ep.long_title, ep.long_title_display]
-    .map((value) => String(value || ''))
-    .join(' ')
-  return /\bpv\b|preview|trailer|teaser/i.test(text)
-}
-
-export function isPlayableEpisode(ep: any): boolean {
-  if (ep?.episode_id == null || String(ep.episode_id).trim() === '') return false
-  if (ep.published === false || Number(ep.published) === 0) return isPreviewEpisode(ep)
-  return true
-}
-
-export function pickPlayableEpisode(episodes: any[]): any | undefined {
-  const list = (episodes || []).filter((ep) => ep?.episode_id != null)
-  return (
-    list.find((ep) => isPlayableEpisode(ep) && !isPreviewEpisode(ep)) ||
-    list.find((ep) => isPreviewEpisode(ep)) ||
-    list.find((ep) => isPlayableEpisode(ep))
-  )
-}
-
 export function extractEpisodes(detail: any): any[] {
   const eps: any[] = []
   const sections = detail?.sections?.section
@@ -379,48 +355,61 @@ export function extractDescription(detail: any): string {
   )
 }
 
-export function normalizeSkip(skip: any): {
-  intro?: { start: number; end: number }
-  outro?: { start: number; end: number }
-} {
+export type SkipRange = { start: number; end: number }
+export type SkipMarkers = {
+  intro?: SkipRange
+  outro?: SkipRange
+}
+
+function asNum(value: unknown) {
+  const n = Number(value)
+  return Number.isFinite(n) ? n : 0
+}
+
+function toSkipRange(start: unknown, end: unknown, treatAsMs: boolean): SkipRange | undefined {
+  let from = asNum(start)
+  let to = asNum(end)
+  if (treatAsMs) {
+    from /= 1000
+    to /= 1000
+  }
+  if (to > from + 0.5) return { start: from, end: to }
+  return undefined
+}
+
+export function normalizeSkip(skip: any): SkipMarkers {
   if (!skip || typeof skip !== 'object') return {}
 
-  if (skip.intro || skip.outro) {
-    const introStart = Number(skip.intro?.start) || 0
-    const introEnd = Number(skip.intro?.end) || 0
-    const outroStart = Number(skip.outro?.start) || 0
-    const outroEnd = Number(skip.outro?.end) || 0
-    return {
-      intro: introEnd > introStart ? { start: introStart, end: introEnd } : undefined,
-      outro: outroEnd > outroStart ? { start: outroStart, end: outroEnd } : undefined,
-    }
-  }
+  const raw = skip.skip && typeof skip.skip === 'object' ? skip.skip : skip
+  const introObj = raw.intro || raw.op || raw.opening
+  const outroObj = raw.outro || raw.ed || raw.ending
 
-  const values = [
-    skip.opening_start_time,
-    skip.opening_end_time,
-    skip.ending_start_time,
-    skip.ending_end_time,
+  const candidates = [
+    introObj?.start,
+    introObj?.end,
+    outroObj?.start,
+    outroObj?.end,
+    raw.opening_start_time,
+    raw.opening_end_time,
+    raw.ending_start_time,
+    raw.ending_end_time,
   ]
-    .map((v) => Number(v))
-    .filter((n) => Number.isFinite(n) && n > 0)
+    .map(asNum)
+    .filter((n) => n > 0)
 
-  const treatAsMs = values.length > 0 && values.every((n) => n >= 10_000)
-
-  const toSec = (v: any) => {
-    const n = Number(v)
-    if (!Number.isFinite(n) || n <= 0) return 0
-    return treatAsMs ? n / 1000 : n
-  }
-
-  const introStart = toSec(skip.opening_start_time)
-  const introEnd = toSec(skip.opening_end_time)
-  const outroStart = toSec(skip.ending_start_time)
-  const outroEnd = toSec(skip.ending_end_time)
+  const treatAsMs = candidates.length > 0 && candidates.every((n) => n >= 10_000)
 
   return {
-    intro: introEnd > introStart ? { start: introStart, end: introEnd } : undefined,
-    outro: outroEnd > outroStart ? { start: outroStart, end: outroEnd } : undefined,
+    intro: toSkipRange(
+      introObj?.start ?? raw.opening_start_time,
+      introObj?.end ?? raw.opening_end_time,
+      treatAsMs
+    ),
+    outro: toSkipRange(
+      outroObj?.start ?? raw.ending_start_time,
+      outroObj?.end ?? raw.ending_end_time,
+      treatAsMs
+    ),
   }
 }
 

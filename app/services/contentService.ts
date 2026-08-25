@@ -10,6 +10,15 @@ export const contentService = {
     return response?.data || response || []
   },
 
+  async getSkip(epId: string): Promise<any> {
+    try {
+      const response: any = await apiGet(API_ENDPOINTS.SKIP(epId))
+      return response?.data?.skip || response?.skip || response?.data || response || {}
+    } catch {
+      return {}
+    }
+  },
+
   async getVideoDetail(epId: string): Promise<any> {
     const response: any = await apiGet(API_ENDPOINTS.VIDEO(epId))
     return response?.data ?? response

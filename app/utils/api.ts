@@ -38,6 +38,7 @@ export const API_ENDPOINTS = {
   RELATED_UGC: (oid: string) => `/related/ugc/${oid}`,
   RELATED_OGV: (oid: string) => `/related/ogv/${oid}`,
   SUBTITLES: (epId: string) => `/related/subtitle/${epId}`,
+  SKIP: (epId: string) => `/related/intro-outro/${epId}`,
   DRACIN_QUALITIES: (seasonId: string, epId: string) =>
     `/dracin/qualities/${seasonId}/${epId}`,
   DRACIN_STREAM_BASE: (seasonId: string, epId: string, quality: number) =>
