@@ -154,6 +154,31 @@ function takeFromPool(
   return taken
 }
 
+async function buildGenreRail(
+  genre: (typeof GENRE_RAILS)[number],
+  used: Set<string>
+): Promise<(Module & { animeItems: Anime[] }) | null> {
+  const items = await fetchGenreItems(genre.key)
+  const fresh = items.filter((item) => {
+    const key = itemKey(item)
+    if (!key || used.has(key)) return false
+    used.add(key)
+    return true
+  })
+  if (fresh.length < MIN_RAIL_ITEMS) return null
+
+  return {
+    module_id: `genre-${genre.key}`,
+    style: 'index_fill',
+    header: {
+      title: genre.label,
+      uri: `/explore?genre=${genre.key}`,
+    },
+    items: fresh.slice(0, MAX_RAIL_ITEMS),
+    animeItems: fresh.slice(0, MAX_RAIL_ITEMS),
+  }
+}
+
 async function enrichModules(
   base: Array<Module & { animeItems: Anime[] }>
 ): Promise<Array<Module & { animeItems: Anime[] }>> {
@@ -182,26 +207,8 @@ async function enrichModules(
   const extras: Array<Module & { animeItems: Anime[] }> = []
   for (const genre of GENRE_RAILS) {
     if (topped.length + extras.length >= MIN_TOTAL_SECTIONS + 2) break
-    const list = pool.get(genre.key) || []
-    const fresh: Anime[] = []
-    while (list.length && fresh.length < MAX_RAIL_ITEMS) {
-      const next = list.shift()!
-      const key = itemKey(next)
-      if (!key || used.has(key)) continue
-      used.add(key)
-      fresh.push(next)
-    }
-    if (fresh.length < MIN_RAIL_ITEMS) continue
-    extras.push({
-      module_id: `genre-${genre.key}`,
-      style: 'index_fill',
-      header: {
-        title: genre.label,
-        uri: `/explore?genre=${genre.key}`,
-      },
-      items: fresh,
-      animeItems: fresh,
-    })
+    const rail = await buildGenreRail(genre, used)
+    if (rail) extras.push(rail)
   }
 
   return [...topped, ...extras]
