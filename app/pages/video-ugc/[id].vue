@@ -146,6 +146,7 @@ onBeforeUnmount(() => ambient.clearAmbient())
             <ExtensionGate>
               <DashPlayer
                 v-if="streamUrl"
+                :key="videoId"
                 :uri="streamUrl"
                 :title="title"
                 :poster="playerPoster"

@@ -29,6 +29,7 @@ export default defineNuxtConfig({
       meta: [
         { name: 'description', content: 'Nusanime — nonton anime subtitle Indonesia' },
         { name: 'theme-color', content: '#18181b' },
+        { name: 'viewport', content: 'width=device-width, initial-scale=1, viewport-fit=cover' },
       ],
       htmlAttrs: { lang: 'id' },
       link: [
@@ -54,7 +55,7 @@ export default defineNuxtConfig({
       __NUSA_D__: JSON.stringify(maskedAesParts[3]),
     },
     optimizeDeps: {
-      include: ['@oplayer/core', '@oplayer/ui', '@oplayer/dash', 'dashjs'],
+      include: ['@nusaplayer/core', '@nusaplayer/ui', '@nusaplayer/dash', 'dashjs'],
     },
   },
 })

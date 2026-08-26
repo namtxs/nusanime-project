@@ -34,6 +34,7 @@ const selectedQuality = ref(2)
 const streamUrl = ref('')
 const subtitles = ref<DashSubtitleTrack[]>([])
 const initialPosition = ref(0)
+let advancingEpisode = false
 const relatedAnime = ref<Anime[]>([])
 const relatedTitle = ref('More like this')
 const activeSectionKey = ref('')
@@ -210,21 +211,26 @@ function buildStream(quality: number) {
 }
 
 function mapSubtitles(list: any[] | undefined): DashSubtitleTrack[] {
-  const seen = new Set<string>()
+  const seenUrl = new Set<string>()
+  const seenLabel = new Set<string>()
   const out: DashSubtitleTrack[] = []
 
   for (const s of list || []) {
     const rawSrc = s?.src || s?.url || ''
     if (!rawSrc) continue
-    const url = getAbsoluteUrl(String(rawSrc))
+    const url = getAbsoluteUrl(String(rawSrc)).replace(/#.*$/, '')
+    if (seenUrl.has(url)) continue
+    seenUrl.add(url)
+
     const language = String(s.subtitle_lang || s.lang || 'und')
-    const key = `${language.toLowerCase()}|${url}`
-    if (seen.has(key)) continue
-    seen.add(key)
+    const label = String(s.title || s.name || s.subtitle_lang || language || 'Subtitle').trim()
+    const labelKey = `${label.toLowerCase()}|${language.toLowerCase()}`
+    if (seenLabel.has(labelKey)) continue
+    seenLabel.add(labelKey)
 
     out.push({
       url,
-      label: String(s.title || s.name || s.subtitle_lang || language || 'Subtitle'),
+      label,
       language,
       isDefault: !!s.default || String(s.subtitle_lang) === 'id',
       type: 'vtt',
@@ -277,6 +283,7 @@ function episodeTitle(ep: any) {
 }
 
 async function load() {
+  advancingEpisode = false
   if (!seasonId.value) {
     error.value = 'Missing season'
     loading.value = false
@@ -421,7 +428,8 @@ function playNext() {
     (e) => String(e.episode_id) === episodeId.value
   )
   const next = episodes.value[idx + 1]
-  if (!next) return
+  if (!next || advancingEpisode) return
+  advancingEpisode = true
   const qs = new URLSearchParams({ seasonId: seasonId.value })
   if (isDracin.value) qs.set('source', 'dracin')
   navigateTo(`/video/${next.episode_id}?${qs.toString()}`)
@@ -557,6 +565,7 @@ onBeforeUnmount(() => ambient.clearAmbient())
             <ExtensionGate>
               <DashPlayer
                 v-if="streamUrl"
+                :key="episodeId"
                 :uri="streamUrl"
                 :title="playerTitle"
                 :poster="playerPoster"
