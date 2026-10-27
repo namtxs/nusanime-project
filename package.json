@@ -14,7 +14,7 @@
     "@nusaplayer/dash": "^1.0.0",
     "@nusaplayer/ui": "^1.0.2",
     "dashjs": "^4.7.4",
-    "nuxt": "^4.5.2",
+    "nuxt": "^4.6.3",
     "vue": "^3.5.41",
     "vue-router": "^5.2.0"
   },
